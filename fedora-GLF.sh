@@ -16,7 +16,7 @@
 # REVISION: april 13th 2024
 #
 # LICENCE:
-# Copyright (C) 2024 Yannick Defais aka Chevek
+# Copyright (C) 2024 Yannick Defais aka Chevek, Cardiac
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -34,6 +34,8 @@
 
 #===================================================================================
 # TODO:
+# - add LC_ALL=C to all commands as we need to understand the logs
+# - split the script into installation logic and functions to handle those datas. 
 # - Add secure boot support for NVIDIA ( https://rpmfusion.org/Howto/Secure%20Boot )
 # - Add Xbox Gamepad support (xpadneo ?)
 # - Add translation support (gettext)
@@ -42,6 +44,7 @@
 # - Add ZLUDA support ( https://github.com/vosen/ZLUDA ), if still relevant...
 
 # Set shell options
+#FIXME: remove this set -e and manage error for each cammand call
 set -e
 
 # Color and Formatting Definitions
@@ -52,6 +55,7 @@ color_text() {
 }
 
 check_network_connection() {
+#FIXME: nolog, and add log if success
     if ! ping -c 1 google.com &> /dev/null; then
         echo "No network connection. Please check your internet connection and try again."
         exit 1
@@ -65,6 +69,7 @@ check_network_connection() {
 #===================================================================================
 
 # Set default configuration
+#use verbose=true as default as long as this script is not stabilised
 VERBOSE=false
 LOG_FILE="$(dirname "$(realpath "$0")")/logfile_Fedora_GLF_$(date "+%Y%m%d-%H%M%S").log"
 
@@ -89,8 +94,9 @@ exec_command() {
     if [ "$VERBOSE" = true ]; then
         log_command+=" (Verbose)"
     fi
-    log INFO "$log_command"
+    log INFO "$log_command" 
     if [ "$VERBOSE" = true ]; then
+#FIXME: add LC_ALL=C at the beginning of each command, as we want to be able to understand the logs, no matter the lang configuration
         eval "$command" 2>&1 | tee -a "$LOG_FILE" || { log ERROR "Failed command: $command"; return 1; }
     else
         eval "$command" >> "$LOG_FILE" 2>&1 || { log ERROR "Failed command: $command"; return 1; }
@@ -131,12 +137,23 @@ updates() {
 # DNF configuration
 # Source : https://linuxtricks.fr/wiki/fedora-script-post-installation
 #===================================================================================
+#FIXME: do not use instruction from the command line as name for function. -> rename function "dnf" to e.g. "config_dnf"
+#line 121: "if dnf check-update --refresh; then"
+#will trigger the function "dnf" and not the command
+#log exemple: There is 2 times "Optimizing DNF:"
+#[2024-04-28 09:14:44] INFO: Checking for system updates:
+#[2024-04-28 09:14:44] INFO: Optimizing DNF:
+#[2024-04-28 09:14:44] INFO: System is up to date.
+#[2024-04-28 09:14:44] INFO: Optimizing DNF:
+#[2024-04-28 09:14:44] INFO: Firmwares update:
 dnf() {
     log_msg "Optimizing DNF:"
+    #FIXME: no log from the instructions below -> log the msg from the echos
     {
         grep -Fq "fastestmirror=" /etc/dnf/dnf.conf || echo 'fastestmirror=true' | sudo tee -a /etc/dnf/dnf.conf
         grep -Fq "max_parallel_downloads=" /etc/dnf/dnf.conf || echo 'max_parallel_downloads=10' | sudo tee -a /etc/dnf/dnf.conf
         grep -Fq "countme=" /etc/dnf/dnf.conf || echo 'countme=true' | sudo tee -a /etc/dnf/dnf.conf
+#FIXME: if run 2 times, there is no ERROR msg in the log
     } || { log ERROR "Failed to configure DNF"; exit 1; }
 }
 
@@ -149,9 +166,14 @@ firmwares() {
     log_msg "Firmwares update:"
     exec_command "sudo fwupdmgr get-devices"
     exec_command "sudo fwupdmgr refresh --force"
+    #FIXME: we need to log those 2 command outputs. As of now this will break with set -e
     RC=0
     sudo fwupdmgr get-updates || RC=$?
     sudo fwupdmgr update || RC=$?
+#FIXME: the exit satus are wrong, from "man fwupdmgr":
+#EXIT STATUS
+#Commands that successfully execute will return “0”, with generic failure as “1”.
+#There are also several other exit codes used: A return code of “2” is used for commands that have no actions but were successfully executed, and “3” is used when a resource was not found.
     if [[ $RC -eq 0 ]]; then
         log_msg "Firmware updated successfully."
     elif [[ $RC -eq 1 ]]; then
@@ -183,7 +205,22 @@ rpmfusion() {
 # Flathub configuration
 # Source : https://flatpak.org/setup/Fedora
 #===================================================================================
+#FIXME: do not use instruction from the command line as name for function. -> rename function "flatpak" to e.g. "flatpak_install"
+#line 333: exec_command "flatpak install -y flatseal"
+#will trigger the function "flatpak" and not the command
+#log exemple: 
+#[2024-04-28 09:15:21] INFO: Executing: flatpak install -y flatseal
+#Adding Flathub repository:
+#[2024-04-28 09:15:21] INFO: Adding Flathub repository:
+#[2024-04-28 09:15:21] INFO: Executing: sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak() {
+#FIXME: rename this function to fedora_third_party
+# this is broken, for some reason it does not activate Flathub
+# change the command to "sudo fedora-third-party enable"
+# this will enable flathub and also some dnf repositories, namely: "copr for pycharm", "google-chrome", "RPM fusion NVIDIA driver" and "RPM Fusion Steam". The last 2 are unecessary if RPM fusion is fully enabled...
+# Source: https://fedoraproject.org/wiki/Changes/Third_Party_Software_Mechanism
+# /var/lib/fedora-third-party/state gives the current state for each third party
+# We could enable custom repositories using /usr/lib/fedora-third-party/conf.d (with either dnf or flatpak)
     log_msg "Adding Flathub repository:"
     exec_command "sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
 
@@ -214,6 +251,11 @@ nvidia() {
 #===================================================================================
 hardware_acceleration() {
     log_msg "GPU hardware acceleration :"
+#FIXME: one can have an integrated Intel GPU and a discret AMD GPU.
+# thus we need to test all cases here separatly, as we want all GPU, discret and integrated, to have good support.
+# "If test-commands returns a non-zero status, each elif list is executed in turn, and if its exit status is zero, the corresponding more-consequents is executed *and the command completes*."
+#Source: https://www.gnu.org/software/bash/manual/bash.html#Conditional-Constructs
+# -> replace all elif with several if...fi 
     if [[ $GPU_TYPE =~ "NVIDIA" ]]; then
         log_msg "Déjà configuré pour les GPU NVIDIA."
         # Note: NVIDIA driver configuration is already handled in the NVIDIA GPU configuration function.
@@ -227,8 +269,8 @@ hardware_acceleration() {
         exec_command "sudo dnf swap -y mesa-va-drivers.i686 mesa-va-drivers-freeworld.i686"
         exec_command "sudo dnf swap -y mesa-vdpau-drivers.i686 mesa-vdpau-drivers-freeworld.i686"
         # RocM
-        log_msg "Install ROCm :" \
-        "sudo dnf -y install rocm-opencl rocminfo rocm-clinfo rocm-hip rocm-runtime rocm-smi"
+        log_msg "Install ROCm :"
+        exec_command "sudo dnf -y install rocm-opencl rocminfo rocm-clinfo rocm-hip rocm-runtime rocm-smi"
     elif [[ $GPU_TYPE =~ "INTEL" ]]; then
         log_msg "INTEL GPU detected :"
         log_msg "Codecs for Mesa3D :"
@@ -252,7 +294,10 @@ hardware_acceleration
 #===================================================================================
 microsoft_fonts() {
     log_msg "Install Microsoft fonts :"
-    exec_command "sudo dnf install -y curl cabextract xorg-x11-font-utils fontconfig"
+    # added mkfontscale mkfontdir xset, as there is errors in the install script
+    exec_command "sudo dnf install -y curl cabextract xorg-x11-font-utils fontconfig mkfontscale mkfontdir xset"
+#FIXME: we should log this and manage error outputs
+# "rpm" command exit code: "the exit code equals the number of failed packages, capped at 255"
     RC=0
     sudo rpm -i https://downloads.sourceforge.net/project/mscorefonts2/rpms/msttcore-fonts-installer-2.6-1.noarch.rpm || RC=$?
     if [[ $RC -eq 0 ]]; then
@@ -281,8 +326,10 @@ compression_tools() {
 
 # Desktop Tools
 various-softwares() {
-    log_msg "Installing OpenRGB, Fastfetch, gamemode, flatseal and uBlock Origin for Firefox:"
-    exec_command "sudo dnf install -y openrgb gamemode fastfetch mozilla-ublock-origin"
+    log_msg "Installing OpenRGB, Fastfetch, flatseal and uBlock Origin for Firefox:"
+    # gamemode is installed by default
+    exec_command "sudo dnf install -y openrgb fastfetch mozilla-ublock-origin"
+    #FIXME: actualy broken, does not install anything. cf. comments lines 208 & 217. Beside there is a rpm.
     exec_command "flatpak install -y flatseal"
 }
 
@@ -305,6 +352,7 @@ nonfree_firmware() {
 
 utilities() {
 compression_tools
+#FIXME: use underscore
 various-softwares
 setup_multimedia
 nonfree_firmware
@@ -315,9 +363,12 @@ gnome() {
     if [[ $(pgrep -c gnome-shell) -gt 0 ]]; then
         log_msg "Installing GNOME Tweaks and essential GNOME Shell extensions:"
         exec_command "sudo dnf install -y gnome-tweaks gnome-extensions-app gnome-shell-extension-appindicator gnome-shell-extension-caffeine gnome-shell-extension-gamemode gnome-shell-extension-gsconnect"
+        # replace gnome-extensions-app? Does it update extensions as gnome-extensions-app does?
+        exec_command "flatpak install flathub com.mattjakeman.ExtensionManager"
 
         if [[ ! -f /etc/dconf/db/local.d/00-extensions ]]; then
             echo "Setting up system-wide GNOME extensions."
+            #FIXME: log all this
             sudo tee /etc/dconf/db/local.d/00-extensions > /dev/null <<EOF
 [org/gnome/shell]
 enabled-extensions=['gsconnect@andyholmes.github.io', 'appindicatorsupport@rgcjonas.gmail.com', 'gamemode@christian.kellner.me', 'caffeine@patapon.info']
@@ -326,11 +377,36 @@ EOF
         else
             log_msg "System-wide GNOME extensions configuration already exists."
         fi
+        #FIXME: This is broken for some reason. Tested on F40, should test on F39 and search bugzilla, seems off per documentations...
+        #log_msg "enable extensions for the current user"
+	#sleep 10
+	#exec_command "gnome-extensions enable gsconnect@andyholmes.github.io"
+	#exec_command "gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com"
+	##FIXME: this will brake as this extension is broken. Need better error management: this should not stop the script, we should find a way to check if an extension is avalaible.
+	##exec_command "gnome-extensions enable gamemode@christian.kellner.me"
+	#exec_command "gnome-extensions enable caffeine@patapon.info"
     fi
 }
 
 desktop_environment() {
 gnome
+}
+
+tools_to_manage_btrfs() {
+# Check if the system is using btrfs for the root partition
+lsblk -f |
+while IFS= read -r line; do
+	if [[ "$line" == */ && "$line" =~ "btrfs" ]]; then #root filesystem && it's using btrfs?
+		log_msg "Btrfs format detected for root partition."
+		# btrfs-assistant run its GUI in root, this is really bad. Any replacement?
+		log_msg "Installing btrfs-assistant :"
+		exec_command "sudo dnf install -y btrfs-assistant"
+	fi
+done
+}
+
+btrfs_management() {
+tools_to_manage_btrfs
 }
 
 # Main function to run all tasks
@@ -343,6 +419,7 @@ main() {
     fonts
     utilities
     desktop_environment
+    btrfs_management
     log_msg "$(color_text 2 "[X] Script completed. Please reboot.")"
 }
 
