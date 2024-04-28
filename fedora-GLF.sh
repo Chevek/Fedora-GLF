@@ -362,7 +362,7 @@ nonfree_firmware
 gnome() {
     if [[ $(pgrep -c gnome-shell) -gt 0 ]]; then
         log_msg "Installing GNOME Tweaks and essential GNOME Shell extensions:"
-        exec_command "sudo dnf install -y gnome-tweaks gnome-extensions-app gnome-shell-extension-appindicator gnome-shell-extension-caffeine gnome-shell-extension-gamemode gnome-shell-extension-gsconnect"
+        exec_command "sudo dnf install -y gnome-tweaks gnome-extensions-app gnome-shell-extension-appindicator gnome-shell-extension-caffeine gnome-shell-extension-gamemode gnome-shell-extension-gsconnect nautilus-gsconnect webextension-gsconnect"
         # replace gnome-extensions-app? Does it update extensions as gnome-extensions-app does?
         exec_command "flatpak install flathub com.mattjakeman.ExtensionManager"
 
